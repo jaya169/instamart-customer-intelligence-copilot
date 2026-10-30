@@ -59,10 +59,22 @@ customers.loc[
    ~customers["age"].between(10, 100),
    "age"
 ] = pd.NA
-# Fill missing ages with the median age
-median_age = customers["age"].median()
-if pd.notna(median_age):
-   customers["age"] = customers["age"].fillna(median_age)
+# Fill missing ages with the median age of the corresponding gender group
+for gender in ["MALE", "FEMALE"]:
+   gender_mask = customers["gender"] == gender
+   median_age = customers.loc[gender_mask, "age"].median()
+   if pd.notna(median_age):
+       customers.loc[gender_mask, "age"] = (
+           customers.loc[gender_mask, "age"].fillna(median_age)
+       )
+# Handle any remaining missing ages using the overall median
+overall_median_age = customers["age"].median()
+if pd.notna(overall_median_age):
+   customers["age"] = customers["age"].fillna(overall_median_age)
+# Standardize gender values to lowercase
+customers["gender"] = customers["gender"].str.lower()
+# Replace missing gender values with "unknown"
+customers["gender"] = customers["gender"].fillna("unknown")
 # 5. Standardize signup dates
 customers["signup_date"] = pd.to_datetime(
    customers["signup_date"],
