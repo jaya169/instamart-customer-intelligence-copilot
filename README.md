@@ -183,3 +183,212 @@ Finally, open the GitHub repository in your browser and verify that the README, 
 The project establishes a repeatable data-quality workflow for auditing and cleaning customer, order, and product datasets using Python and Pandas.
 The workflow addresses missing values, duplicate records, inconsistent categorical values, invalid numeric data, date conversion, and business-rule-based imputation.
 The resulting datasets can be used as a foundation for further customer intelligence and analytics.
+13. Data Storage and Validation
+Data Storage
+The three cleaned datasets are stored as CSV files in the data/clean/ directory:
+● customers_clean.csv
+● products_clean.csv
+● orders_clean.csv
+The datasets are also stored in a SQLite database at data/instamart.db.
+The database contains the following tables:
+|Table      |Description          |
+|-----------|---------------------|
+|`customers`|Cleaned customer data|
+|`products` |Cleaned product data |
+|`orders`   |Cleaned order data   |
+The order_ts column is stored as text in the format YYYY-MM-DD HH:MM:SS.
+Validation
+The validate_data.py script checks the cleaned datasets against the expected reference values.
+Validation includes customer city and gender distributions, age validity, order counts, order status distributions, missing values, completed order totals, CSV file availability, SQLite table existence, database row counts, and timestamp storage.
+Run the storage script:
+python store_data.py
+Run the validation script:
+python validate_data.py
+When all validation assertions pass, the script prints:
+ALL CHECKPOINTS PASSED
+The validation process helps confirm that the cleaned datasets are stored correctly and meet the required reference checkpoints.
+14. SQL Analysis
+Overview
+
+Seven SQL queries were created and executed against the SQLite database data/instamart.db using Python and Pandas. The SQL queries are stored in sql/queries.sql, and their results are retrieved using pd.read_sql_query().
+
+Unless otherwise specified, only orders with the status completed are considered when calculating revenue and customer spending.
+Q1 — WHERE and HAVING
+Objective: Identify customers whose completed orders have an individual order amount greater than INR 500 and whose combined value of those orders exceeds INR 8,000.
+Approach:
+
+Use WHERE to filter completed orders with order_amount > 500.
+
+Group the filtered records by customer.
+
+Use HAVING to retain customers whose total qualifying order amount exceeds INR 8,000.
+Expected result: 30 customers.
+Q2 — Three-Table JOIN
+Objective: Calculate revenue by customer city and product category.
+Approach:
+
+Join the orders, customers, and products tables.
+
+Filter for completed orders.
+
+Group the results by city and product category.
+
+Calculate revenue as the sum of order_amount.
+Expected results:
+
+Total rows: 30.
+
+Total revenue: INR 2,998,668.80.
+
+Highest-revenue city and category combination: Bengaluru / Electronics.
+
+Revenue for Bengaluru / Electronics: INR 233,909.45.
+Q3 — Scalar Subquery
+Objective: Identify products priced above the average catalogue price.
+Approach:
+
+Calculate the average product price using a scalar subquery.
+
+Return products whose prices exceed that average.
+Expected result: 11 products.
+Q4 — LEFT JOIN
+Objective: Identify customers who have never placed a completed order.
+Approach:
+
+Use a LEFT JOIN between customers and orders.
+
+Restrict the matching orders to completed orders in the join condition.
+
+Identify customers for whom no completed order exists.
+Expected result: 25 customers.
+Q5 — Common Table Expression (CTE)
+Objective: Identify customers whose total completed spending is above the average total spending per customer.
+Approach:
+
+The first CTE calculates each customer’s total completed spending.
+
+The second CTE calculates the average of those customer spending totals.
+
+The main query returns customers whose total completed spending exceeds that average.
+
+Customers without completed orders are excluded from the spending calculation.
+Expected results:
+
+Customers above average spending: 550.
+
+Average completed spending per customer: INR 2,552.06, rounded to two decimal places.
+Q6 — Ranking Window Functions
+Objective: Rank customers by total completed spending within each city.
+Approach:
+
+Calculate each customer’s total completed spending.
+
+Use PARTITION BY city to rank customers independently within each city.
+
+Use ORDER BY total_spend DESC to rank customers from highest to lowest spending.
+
+Apply RANK(), DENSE_RANK(), and ROW_NUMBER().
+Expected top customer in each city:
+City
+Customer ID
+Total Spend (INR)
+Bengaluru
+
+C0082
+
+12,856.20
+
+Chennai
+
+C0930
+
+10,151.40
+
+Delhi
+
+C0291
+
+13,742.60
+
+Hyderabad
+
+C0743
+
+12,730.05
+
+Mumbai
+
+C0693
+
+14,766.55
+
+Pune
+
+C0426
+
+10,377.10
+Expected validation: Exactly 8 rows have different RANK() and ROW_NUMBER() values.
+Explanation of ties: When customers have equal spending, RANK() assigns them the same rank and skips subsequent rank numbers, whereas ROW_NUMBER() assigns each row a unique sequential number. Therefore, ties can cause the two ranking functions to return different values.
+Q7 — Running Total
+Objective: Calculate daily completed revenue and its cumulative total over time.
+Approach:
+
+Extract the date from the first ten characters of order_ts.
+
+Calculate total completed revenue for each day.
+
+Use SUM(revenue) OVER (ORDER BY day) to calculate cumulative revenue.
+Expected results:
+
+Daily rows: 183.
+
+Final cumulative revenue: INR 2,998,668.80.
+SQL Execution and Validation
+
+All seven SQL queries are stored in sql/queries.sql.
+
+The queries are executed from Python using pd.read_sql_query() against data/instamart.db. The results are checked against the reference values specified in the project requirements.
+
+The analysis demonstrates the use of:
+
+WHERE and HAVING clauses.
+
+Multi-table joins, including LEFT JOIN.
+
+Scalar subqueries.
+
+Common Table Expressions (CTEs).
+
+Window functions: RANK(), DENSE_RANK(), and ROW_NUMBER().
+
+Running totals using SUM() OVER().
+Conclusion: The SQL analysis validates customer spending, city-level revenue, product pricing, customers without completed orders, spending patterns, customer rankings, and cumulative daily revenue.
+15. Pandas Cross-Check and Exploratory Data Analysis
+Revenue Cross-Check
+The pandas_analysis.py script rebuilds the SQL city-and-category revenue analysis using pd.pivot_table() with margins=True.
+The grand total from the Pandas pivot table is compared against the completed-order revenue calculated in SQLite. Both should equal INR 2,998,668.80.
+City-Level Aggregation
+The script uses Pandas groupby() and named aggregation to calculate the sum, mean, and count of completed order amounts for each city.
+Reference checks:
+Bengaluru: sum INR 523,643.40, mean INR 276.47, count 1,894.
+Mumbai: sum INR 479,058.50, mean INR 297.00, count 1,613.
+Order Amount Distribution
+The analysis reports the mean, median, skewness, quartiles, interquartile range, 1.5 × IQR fences, and the number of outliers beyond each fence.
+Reference statistics:
+Mean: INR 269.91.
+Median: INR 135.00.
+Skewness: approximately 4.61.
+Q1: INR 64.80.
+Q3: INR 297.00.
+Lower fence: -INR 283.50.
+Upper fence: INR 645.30.
+Outliers below the lower fence: 0.
+Outliers above the upper fence: 897.
+Correlation Analysis
+A correlation matrix is calculated for order_amount, discount_pct, quantity, and delivery_minutes among completed orders.
+The largest absolute correlation is expected between order_amount and discount_pct, at approximately -0.095. This indicates a very weak negative linear association. Correlation of this size does not establish causation.
+Running the Analysis
+Execute the script from the project root:
+python pandas_analysis.py
+The script saves the revenue pivot, city summary, order amount statistics, and correlation matrix as CSV files in data/clean/.
+ 
