@@ -1,82 +1,152 @@
-from pathlib import Path
 import pandas as pd
-# Define input and output directories
-RAW = Path("data/raw")
-CLEAN = Path("data/clean")
-# Create the clean directory if it doesn't exist
-CLEAN.mkdir(parents=True, exist_ok=True)
-# Load the original order data
-orders = pd.read_csv(RAW / "orders.csv")
-print("--- ORIGINAL ORDER DATA ---")
-print("Dataset shape:", orders.shape)
-# 1. Remove duplicate rows
-orders = orders.drop_duplicates()
-# 2. Clean column names
-orders.columns = orders.columns.str.strip()
-# 3. Clean text columns
-for column in ["status"]:
-   if column in orders.columns:
-       orders[column] = orders[column].astype("string").str.strip().str.lower()
-# 4. Clean order amount
-if "order_amount" in orders.columns:
-   orders["order_amount"] = pd.to_numeric(
-       orders["order_amount"], errors="coerce"
-   )
-# 5. Clean quantity
-if "quantity" in orders.columns:
-   orders["quantity"] = pd.to_numeric(
-       orders["quantity"], errors="coerce"
-   )
-# 6. Clean discount percentage
-if "discount_pct" in orders.columns:
-   orders["discount_pct"] = pd.to_numeric(
-       orders["discount_pct"], errors="coerce"
-   )
-# 7. Clean delivery time
-if "delivery_minutes" in orders.columns:
-   orders["delivery_minutes"] = pd.to_numeric(
-       orders["delivery_minutes"], errors="coerce"
-   )
-# 8. Handle missing values
-# Keep missing order amounts as NaN because the actual amount is unknown.
-# Remove records with missing essential identifiers
-essential_columns = [
-   column
-   for column in ["order_id", "customer_id", "product_id"]
-   if column in orders.columns
-]
-if essential_columns:
-   orders = orders.dropna(subset=essential_columns)
-# 9. Validate order amounts
-if "order_amount" in orders.columns:
-   invalid_amounts = orders["order_amount"].lt(0)
-   orders.loc[invalid_amounts, "order_amount"] = pd.NA
-# 10. Validate quantities
-if "quantity" in orders.columns:
-   invalid_quantities = orders["quantity"].le(0)
-   orders.loc[invalid_quantities, "quantity"] = pd.NA
-# 11. Validate discount percentages
-if "discount_pct" in orders.columns:
-   invalid_discounts = ~orders["discount_pct"].between(0, 100)
-   orders.loc[invalid_discounts, "discount_pct"] = pd.NA
-# 12. Validate delivery minutes
-if "delivery_minutes" in orders.columns:
-   invalid_delivery = orders["delivery_minutes"].lt(0)
-   orders.loc[invalid_delivery, "delivery_minutes"] = pd.NA
-# 13. Validate order status
-valid_statuses = ["completed", "cancelled", "pending"]
-if "status" in orders.columns:
-   invalid_status = ~orders["status"].isin(valid_statuses)
-   orders.loc[invalid_status, "status"] = pd.NA
-# 14. Save cleaned data
-output_file = CLEAN / "orders_clean.csv"
-orders.to_csv(output_file, index=False)
-# 15. Display cleaning results
-print("\n--- CLEANING RESULTS ---")
-print("Original records after cleaning:", len(orders))
-print("Remaining missing values:")
-print(orders.isna().sum().to_string())
-print("\nCleaned sample:")
-print(orders.head().to_string(index=False))
-print("\nCleaned dataset saved to:", output_file)
-print("Order cleaning completed.")
+from pathlib import Path
+# --------------------------------------------------
+# 1. DEFINE FILE PATHS
+# --------------------------------------------------
+RAW_DIR = Path("data/raw")
+CLEAN_DIR = Path("data/clean")
+CLEAN_DIR.mkdir(parents=True, exist_ok=True)
+# --------------------------------------------------
+# 2. LOAD RAW ORDERS AND PRODUCTS
+# --------------------------------------------------
+orders = pd.read_csv(RAW_DIR / "orders.csv")
+products = pd.read_csv(RAW_DIR / "products.csv")
+
+print("Orders columns:", orders.columns.tolist())
+print("Products columns:", products.columns.tolist())
+# --------------------------------------------------
+# 3. CONVERT order_ts TO DATETIME
+# --------------------------------------------------
+orders["order_ts"] = pd.to_datetime(
+   orders["order_ts"],
+   errors="coerce"
+)
+# --------------------------------------------------
+# 4. REMOVE EXACT DUPLICATE ROWS
+# --------------------------------------------------
+orders = orders.drop_duplicates().copy()
+# --------------------------------------------------
+# 5. KEEP THE LATEST RECORD FOR EACH order_id
+# --------------------------------------------------
+orders = (
+   orders.sort_values("order_ts", kind="stable")
+   .drop_duplicates(subset=["order_id"], keep="last")
+   .copy()
+)
+# --------------------------------------------------
+# 6. CONVERT order_amount TO NUMERIC
+# --------------------------------------------------
+orders["order_amount"] = pd.to_numeric(
+   orders["order_amount"],
+   errors="coerce"
+)
+# --------------------------------------------------
+# 7. PREPARE PRODUCT PRICES
+# --------------------------------------------------
+products["price_inr"] = pd.to_numeric(
+   products["price_inr"],
+   errors="coerce"
+)
+# Match orders with their product prices.
+# Rename the price column to avoid conflicts.
+orders = orders.merge(
+   products[["product_id", "price_inr"]],
+   on="product_id",
+   how="left",
+   validate="many_to_one"
+)
+# Convert quantity and discount to numeric.
+orders["quantity"] = pd.to_numeric(
+   orders["quantity"],
+   errors="coerce"
+)
+orders["discount_pct"] = pd.to_numeric(
+   orders["discount_pct"],
+   errors="coerce"
+)
+# --------------------------------------------------
+# 8. FILL MISSING ORDER AMOUNTS
+# Formula:
+# price * quantity * (1 - discount_pct / 100)
+# --------------------------------------------------
+calculated_amount = (
+   orders["price_inr"]
+   * orders["quantity"]
+   * (1 - orders["discount_pct"] / 100)
+).round(2)
+orders["order_amount"] = orders["order_amount"].fillna(
+   calculated_amount
+)
+# Remove the temporary product price column.
+orders = orders.drop(columns=["price_inr"])
+# --------------------------------------------------
+# 9. SET NEGATIVE DELIVERY TIMES TO MISSING
+# --------------------------------------------------
+orders["delivery_minutes"] = pd.to_numeric(
+   orders["delivery_minutes"],
+   errors="coerce"
+)
+orders.loc[
+   orders["delivery_minutes"] < 0,
+   "delivery_minutes"
+] = float("nan")
+# --------------------------------------------------
+# 10. IMPUTE COMPLETED-ORDER DELIVERY TIMES
+# Use the median for each product category among
+# completed orders, using groupby and transform.
+# --------------------------------------------------
+# Get product categories.
+orders = orders.merge(
+   products[["product_id", "category"]],
+   on="product_id",
+   how="left",
+   validate="many_to_one"
+)
+completed_mask = orders["status"].astype(str).str.strip().str.lower().eq(
+   "completed"
+)
+completed_medians = (
+   orders.loc[completed_mask]
+   .groupby("category")["delivery_minutes"]
+   .transform("median")
+)
+# Fill missing delivery times only for completed orders.
+orders.loc[completed_mask, "delivery_minutes"] = (
+   orders.loc[completed_mask, "delivery_minutes"]
+   .fillna(completed_medians)
+)
+# Cancelled orders must have missing delivery times.
+cancelled_mask = orders["status"].astype(str).str.strip().str.lower().eq(
+   "cancelled"
+)
+orders.loc[cancelled_mask, "delivery_minutes"] = float("nan")
+# --------------------------------------------------
+# 11. SAVE CLEANED ORDERS
+# --------------------------------------------------
+orders.to_csv(
+   CLEAN_DIR / "orders_clean.csv",
+   index=False
+)
+# --------------------------------------------------
+# 12. VALIDATE RESULTS
+# --------------------------------------------------
+print("\nCLEAN ORDERS VALIDATION")
+print("-" * 50)
+print("Total rows:", len(orders))
+print("Distinct order IDs:", orders["order_id"].nunique())
+print("\nOrder status counts:")
+print(orders["status"].value_counts())
+print("\nMissing order amounts:", orders["order_amount"].isna().sum())
+print(
+   "Missing delivery minutes among completed orders:",
+   orders.loc[completed_mask, "delivery_minutes"].isna().sum()
+)
+print(
+   "Missing delivery minutes among cancelled orders:",
+   orders.loc[cancelled_mask, "delivery_minutes"].isna().sum()
+)
+print(
+   "Completed orders amount total:",
+   round(orders.loc[completed_mask, "order_amount"].sum(), 2)
+)
+print("\nCleaned orders saved to data/clean/orders_clean.csv")
