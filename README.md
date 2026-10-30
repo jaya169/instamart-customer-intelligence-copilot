@@ -1,4 +1,23 @@
 Instamart Customer Intelligence Copilot
+Reproduce
+Follow these steps to set up and run the project locally.
+1. Clone the repository
+git clone https://github.com/jaya169/instamart-customer-intelligence-copilot.git
+cd instamart-customer-intelligence-copilot
+2. Create a virtual environment
+python -m venv .venv
+3. Activate the virtual environment
+Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+macOS/Linux:
+source .venv/bin/activate
+4. Install dependencies
+python -m pip install -r requirements.txt
+5. Generate the data
+python generate_data.py
+
+
+
 1. Project Overview
 The Instamart Customer Intelligence Copilot project aims to organize, clean, and analyze customer, order, and product data to support business insights and customer intelligence.
 The project uses Python and Pandas for data processing and data quality validation. The cleaned datasets provide a foundation for further analysis, reporting, and the development of an AI-powered customer intelligence copilot.
